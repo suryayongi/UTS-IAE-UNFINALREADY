@@ -1,5 +1,10 @@
 const express = require('express');
-const { ApolloServer } = require('apollo-server-express');
+const { createServer } = require('http'); // BARU: Untuk bikin HTTP Server manual
+const { WebSocketServer } = require('ws'); // BARU: Untuk server realtime
+const { useServer } = require('graphql-ws/lib/use/ws'); // BARU: Library penghubung GraphQL ke WS
+const { ApolloServer, gql } = require('apollo-server-express');
+const { makeExecutableSchema } = require('@graphql-tools/schema'); // BARU: Untuk menyatukan TypeDefs & Resolvers
+const { ApolloServerPluginDrainHttpServer } = require('apollo-server-core'); // BARU: Plugin agar server mati dengan rapi
 const { PubSub } = require('graphql-subscriptions');
 const { v4: uuidv4 } = require('uuid');
 const cors = require('cors');
@@ -19,205 +24,166 @@ app.use(cors({
 }));
 
 // In-memory data store (replace with real database in production)
-let posts = [
+// Data dummy untuk Tasks
+let tasks = [
   {
     id: '1',
-    title: 'Welcome to GraphQL',
-    content: 'This is our first GraphQL post with subscriptions!',
-    author: 'GraphQL Team',
+    title: 'Bikin Laporan UTS',
+    description: 'Laporan harus selesai hari Jumat',
+    status: 'IN_PROGRESS',
+    assignedTo: '1', // ID User (misal: John Doe)
+    teamId: 'team-A',
     createdAt: new Date().toISOString(),
   },
   {
     id: '2',
-    title: 'Real-time Updates',
-    content: 'Watch this space for real-time updates using GraphQL subscriptions.',
-    author: 'Development Team',
+    title: 'Fix Bug GraphQL',
+    description: 'Subscription masih error nih',
+    status: 'TODO',
+    assignedTo: '2', // ID User (misal: Jane)
+    teamId: 'team-A',
     createdAt: new Date().toISOString(),
   }
 ];
 
-let comments = [
-  {
-    id: '1',
-    postId: '1',
-    content: 'Great introduction to GraphQL!',
-    author: 'John Doe',
-    createdAt: new Date().toISOString(),
-  }
-];
 
-// GraphQL type definitions
-const typeDefs = `
-  type Post {
+
+const typeDefs = gql`
+  type Task {
     id: ID!
     title: String!
-    content: String!
-    author: String!
-    createdAt: String!
-    comments: [Comment!]!
-  }
-
-  type Comment {
-    id: ID!
-    postId: ID!
-    content: String!
-    author: String!
+    description: String
+    status: String!
+    assignedTo: String
+    teamId: String
     createdAt: String!
   }
 
   type Query {
-    posts: [Post!]!
-    post(id: ID!): Post
-    comments(postId: ID!): [Comment!]!
+    tasks: [Task!]!
+    task(id: ID!): Task
+    myTeamTasks(teamId: String!): [Task!]!
   }
 
   type Mutation {
-    createPost(title: String!, content: String!, author: String!): Post!
-    updatePost(id: ID!, title: String, content: String): Post!
-    deletePost(id: ID!): Boolean!
-    createComment(postId: ID!, content: String!, author: String!): Comment!
-    deleteComment(id: ID!): Boolean!
+    createTask(title: String!, description: String, status: String, assignedTo: String, teamId: String!): Task!
+    updateTask(id: ID!, title: String, description: String, status: String, assignedTo: String): Task!
+    deleteTask(id: ID!): Boolean!
   }
-
+  
   type Subscription {
-    postAdded: Post!
-    commentAdded: Comment!
-    postUpdated: Post!
-    postDeleted: ID!
+    taskCreated: Task!
+    taskUpdated: Task!
+    taskDeleted: ID!
   }
 `;
 
 // GraphQL resolvers
 const resolvers = {
   Query: {
-    posts: () => posts,
-    post: (_, { id }) => posts.find(post => post.id === id),
-    comments: (_, { postId }) => comments.filter(comment => comment.postId === postId),
-  },
-
-  Post: {
-    comments: (parent) => comments.filter(comment => comment.postId === parent.id),
+    // Kalau frontend minta 'tasks', kasih semua data tasks
+    tasks: () => tasks,
+    // Kalau minta satu task berdasarkan ID
+    task: (_, { id }) => tasks.find(task => task.id === id),
+    // Kalau minta task khusus tim tertentu
+    myTeamTasks: (_, { teamId }) => tasks.filter(task => task.teamId === teamId),
   },
 
   Mutation: {
-    createPost: (_, { title, content, author }) => {
-      const newPost = {
-        id: uuidv4(),
+    // Logika untuk membuat task baru
+    createTask: (_, { title, description, status, assignedTo, teamId }) => {
+      const newTask = {
+        id: uuidv4(), // Generate ID unik baru
         title,
-        content,
-        author,
+        description: description || '',
+        status: status || 'TODO',
+        assignedTo: assignedTo || null,
+        teamId,
         createdAt: new Date().toISOString(),
       };
-      posts.push(newPost);
-      
-      // Publish to subscribers
-      pubsub.publish('POST_ADDED', { postAdded: newPost });
-      
-      return newPost;
+      tasks.push(newTask); // Masukkan ke array In-Memory
+      pubsub.publish('TASK_CREATED', { taskCreated: newTask });
+      return newTask;
     },
 
-    updatePost: (_, { id, title, content }) => {
-      const postIndex = posts.findIndex(post => post.id === id);
-      if (postIndex === -1) {
-        throw new Error('Post not found');
-      }
+    // Logika update task
+    updateTask: (_, { id, title, description, status, assignedTo }) => {
+      const taskIndex = tasks.findIndex(task => task.id === id);
+      if (taskIndex === -1) throw new Error('Task not found');
 
-      const updatedPost = {
-        ...posts[postIndex],
+      // Update hanya field yang dikirim saja
+      const updatedTask = {
+        ...tasks[taskIndex],
         ...(title && { title }),
-        ...(content && { content }),
+        ...(description && { description }),
+        ...(status && { status }),
+        ...(assignedTo && { assignedTo }),
       };
-
-      posts[postIndex] = updatedPost;
-      
-      // Publish to subscribers
-      pubsub.publish('POST_UPDATED', { postUpdated: updatedPost });
-      
-      return updatedPost;
+      tasks[taskIndex] = updatedTask;
+      pubsub.publish('TASK_UPDATED', { taskUpdated: updatedTask });
+      return updatedTask;
     },
 
-    deletePost: (_, { id }) => {
-      const postIndex = posts.findIndex(post => post.id === id);
-      if (postIndex === -1) {
-        return false;
-      }
+    // Logika hapus task
+    deleteTask: (_, { id }) => {
+      const taskIndex = tasks.findIndex(task => task.id === id);
+      if (taskIndex === -1) return false;
 
-      // Remove associated comments
-      comments = comments.filter(comment => comment.postId !== id);
-      
-      // Remove post
-      posts.splice(postIndex, 1);
-      
-      // Publish to subscribers
-      pubsub.publish('POST_DELETED', { postDeleted: id });
-      
-      return true;
-    },
-
-    createComment: (_, { postId, content, author }) => {
-      const post = posts.find(p => p.id === postId);
-      if (!post) {
-        throw new Error('Post not found');
-      }
-
-      const newComment = {
-        id: uuidv4(),
-        postId,
-        content,
-        author,
-        createdAt: new Date().toISOString(),
-      };
-      
-      comments.push(newComment);
-      
-      // Publish to subscribers
-      pubsub.publish('COMMENT_ADDED', { commentAdded: newComment });
-      
-      return newComment;
-    },
-
-    deleteComment: (_, { id }) => {
-      const commentIndex = comments.findIndex(comment => comment.id === id);
-      if (commentIndex === -1) {
-        return false;
-      }
-
-      comments.splice(commentIndex, 1);
+      tasks.splice(taskIndex, 1); // Hapus dari array
+      pubsub.publish('TASK_DELETED', { taskDeleted: id });
       return true;
     },
   },
-
   Subscription: {
-    postAdded: {
-      subscribe: () => pubsub.asyncIterator(['POST_ADDED']),
+    taskCreated: {
+      subscribe: () => pubsub.asyncIterator(['TASK_CREATED']),
     },
-    commentAdded: {
-      subscribe: () => pubsub.asyncIterator(['COMMENT_ADDED']),
+    taskUpdated: {
+      subscribe: () => pubsub.asyncIterator(['TASK_UPDATED']),
     },
-    postUpdated: {
-      subscribe: () => pubsub.asyncIterator(['POST_UPDATED']),
-    },
-    postDeleted: {
-      subscribe: () => pubsub.asyncIterator(['POST_DELETED']),
+    taskDeleted: {
+      subscribe: () => pubsub.asyncIterator(['TASK_DELETED']),
     },
   },
 };
 
 async function startServer() {
-  // Create Apollo Server
+  // Setup Express dan HTTP Server
+  const app = express();
+  const httpServer = createServer(app);
+
+  // Setup CORS agar bisa diakses dari mana saja
+  app.use(cors({
+    origin: [
+       'http://localhost:3000', 'http://localhost:3002',
+       'http://api-gateway:3000', 'http://frontend-app:3002'
+    ],
+    credentials: true
+  }));
+
+  // Buat Schema GraphQL (gabungan typeDefs dan resolvers)
+  const schema = makeExecutableSchema({ typeDefs, resolvers });
+
+  // Setup WebSocket Server untuk Subscriptions (Jantung Real-time)
+  const wsServer = new WebSocketServer({
+    server: httpServer,
+    path: '/graphql',
+  });
+  // Aktifkan server WebSocket menggunakan schema kita
+  const serverCleanup = useServer({ schema }, wsServer);
+
+  // Setup Apollo Server dengan plugin agar shutdown rapi
   const server = new ApolloServer({
-    typeDefs,
-    resolvers,
-    context: ({ req }) => {
-      // Add authentication logic here if needed
-      return { req };
-    },
+    schema,
     plugins: [
+      // Plugin untuk menutup HTTP server saat dimatikan
+      ApolloServerPluginDrainHttpServer({ httpServer }),
       {
-        requestDidStart() {
+        // Plugin untuk menutup WebSocket server saat dimatikan
+        async serverWillStart() {
           return {
-            willSendResponse(requestContext) {
-              console.log(`GraphQL ${requestContext.request.operationName || 'Anonymous'} operation completed`);
+            async drainServer() {
+              await serverCleanup.dispose();
             },
           };
         },
@@ -229,25 +195,15 @@ async function startServer() {
   server.applyMiddleware({ app, path: '/graphql' });
 
   const PORT = process.env.PORT || 4000;
-  
-  const httpServer = app.listen(PORT, () => {
-    console.log(`🚀 GraphQL API Server running on port ${PORT}`);
-    console.log(`🔗 GraphQL endpoint: http://localhost:${PORT}${server.graphqlPath}`);
-    console.log(`📊 GraphQL Playground: http://localhost:${PORT}${server.graphqlPath}`);
-    console.log(`📡 Subscriptions ready`);
-  });
-
-  // Setup subscriptions
-  server.installSubscriptionHandlers(httpServer);
-
-  // Graceful shutdown
-  process.on('SIGTERM', () => {
-    console.log('SIGTERM received, shutting down gracefully');
-    httpServer.close(() => {
-      console.log('Process terminated');
-    });
+  // PENTING: Gunakan httpServer.listen, BUKAN app.listen
+  httpServer.listen(PORT, () => {
+    console.log(`🚀 Task Service (GraphQL) running on port ${PORT}`);
+    console.log(`📡 Subscriptions ready at ws://localhost:${PORT}/graphql`);
   });
 }
+
+// Jalankan mesinnya!
+startServer().catch(err => console.error('Failed to start server:', err));
 
 // Health check endpoint
 app.get('/health', (req, res) => {

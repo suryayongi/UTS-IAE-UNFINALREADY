@@ -5,6 +5,14 @@ const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 require('dotenv').config();
 
+// uts
+const jwt = require('jsonwebtoken');
+const fs = require('fs');
+const path = require('path');
+
+// Load Public Key untuk verifikasi token uts
+const publicKey = fs.readFileSync(path.join(__dirname, 'public.key'), 'utf8');
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -22,12 +30,13 @@ app.use(cors({
 }));
 
 // Rate limiting
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // limit each IP to 100 requests per windowMs
-  message: 'Too many requests from this IP, please try again later.'
-});
-app.use(limiter);
+// dmatiin dlu utk ngeceknya uts
+// const limiter = rateLimit({
+//   windowMs: 15 * 60 * 1000, // 15 minutes
+//   max: 100, // limit each IP to 100 requests per windowMs
+//   message: 'Too many requests from this IP, please try again later.'
+// });
+// app.use(limiter);
 
 // Health check endpoint
 app.get('/health', (req, res) => {
@@ -40,6 +49,8 @@ app.get('/health', (req, res) => {
     }
   });
 });
+
+
 
 // Proxy configuration for REST API
 const restApiProxy = createProxyMiddleware({
@@ -77,9 +88,45 @@ const graphqlApiProxy = createProxyMiddleware({
   }
 });
 
+
+// Middleware Satpam (Otentikasi JWT)
+const authMiddleware = (req, res, next) => {
+  // 1. Cek apakah request membawa token di header Authorization
+  const authHeader = req.headers.authorization;
+  
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    // Kalau tidak ada token, tolak!
+    return res.status(401).json({
+      error: 'Unauthorized',
+      message: 'Access denied. No valid token provided.'
+    });
+  }
+
+  // 2. Ambil tokennya saja (buang kata 'Bearer ')
+  const token = authHeader.split(' ')[1];
+
+  try {
+    // 3. Verifikasi token menggunakan Public Key
+    const decoded = jwt.verify(token, publicKey, { algorithms: ['RS256'] });
+    
+    // 4. Kalau berhasil, simpan data user di request supaya bisa dipakai service lain
+    req.user = decoded;
+    
+    // 5. Lanjut ke service berikutnya (misal: GraphQL)
+    next();
+  } catch (error) {
+    // Kalau verifikasi gagal (token palsu/kadaluwarsa), tolak!
+    return res.status(403).json({
+      error: 'Forbidden',
+      message: 'Invalid or expired token.'
+    });
+  }
+};
+
 // Apply proxies
 app.use('/api', restApiProxy);
-app.use('/graphql', graphqlApiProxy);
+// ngejaga yg kita buat 
+app.use('/graphql', authMiddleware, graphqlApiProxy);
 
 // Catch-all route
 app.get('*', (req, res) => {
