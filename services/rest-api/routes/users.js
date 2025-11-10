@@ -33,7 +33,7 @@ let users = [
     role: 'user',
     // uts
     password: 'adminpassword', 
-    teamId: 'team-A',
+    teamId: 'team-b',
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString()
   }
