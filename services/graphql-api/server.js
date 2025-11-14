@@ -125,7 +125,12 @@ const resolvers = {
     },
 
     // Logika hapus task
-    deleteTask: (_, { id }) => {
+    deleteTask: (_, { id }, context) => { // 1. Terima 'context'
+      // 2. Cek Role dari JWT Token
+      if (context.user.role !== 'admin') {
+        throw new Error('Unauthorized! Only admins can delete tasks.');
+      }
+    
       const taskIndex = tasks.findIndex(task => task.id === id);
       if (taskIndex === -1) return false;
 
@@ -175,6 +180,11 @@ async function startServer() {
   // Setup Apollo Server dengan plugin agar shutdown rapi
   const server = new ApolloServer({
     schema,
+    // TAMBAHAN BARU:
+    context: ({ req }) => {
+      // Ambil data user yang sudah diverifikasi oleh Gateway
+      return { user: req.user };
+    },
     plugins: [
       // Plugin untuk menutup HTTP server saat dimatikan
       ApolloServerPluginDrainHttpServer({ httpServer }),
@@ -212,8 +222,9 @@ app.get('/health', (req, res) => {
     service: 'graphql-api',
     timestamp: new Date().toISOString(),
     data: {
-      posts: posts.length,
-      comments: comments.length
+      // posts: posts.length, // DIUBAH
+      // comments: comments.length // DIUBAH
+      tasks: tasks.length
     }
   });
 });
@@ -225,9 +236,4 @@ app.use((err, req, res, next) => {
     error: 'Internal server error',
     message: process.env.NODE_ENV === 'development' ? err.message : 'Something went wrong'
   });
-});
-
-startServer().catch(error => {
-  console.error('Failed to start GraphQL server:', error);
-  process.exit(1);
 });

@@ -20,7 +20,7 @@ let users = [
     age: 30,
     role: 'admin',
     // UTS
-    password: 'adminpassword', 
+    password: 'adminpassword',
     teamId: 'team-A',
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString()
@@ -32,10 +32,10 @@ let users = [
     age: 25,
     role: 'user',
     // uts
-    password: 'adminpassword', 
+    password: 'adminpassword',
     teamId: 'team-b',
     createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString() 
+    updatedAt: new Date().toISOString()
   },
   {
     id: '3',
@@ -44,38 +44,38 @@ let users = [
     age: 25,
     role: 'admin',
     // uts
-    password: 'adminpassword', 
+    password: 'adminpassword',
     teamId: 'team-b',
     createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString() 
+    updatedAt: new Date().toISOString()
   }
 ];
 
 // GET /api/users - Get all users
 router.get('/', (req, res) => {
   const { page, limit, role, search } = req.query;
-  
+
   let filteredUsers = [...users];
-  
+
   // Filter by role
   if (role) {
     filteredUsers = filteredUsers.filter(user => user.role === role);
   }
-  
+
   // Search by name or email
   if (search) {
-    filteredUsers = filteredUsers.filter(user => 
+    filteredUsers = filteredUsers.filter(user =>
       user.name.toLowerCase().includes(search.toLowerCase()) ||
       user.email.toLowerCase().includes(search.toLowerCase())
     );
   }
-  
+
   // If pagination params provided, return paginated response
   if (page && limit) {
     const startIndex = (page - 1) * limit;
     const endIndex = page * limit;
     const paginatedUsers = filteredUsers.slice(startIndex, endIndex);
-    
+
     return res.json({
       users: paginatedUsers,
       pagination: {
@@ -87,7 +87,7 @@ router.get('/', (req, res) => {
       }
     });
   }
-  
+
   // Otherwise return all users as simple array
   res.json(filteredUsers);
 });
@@ -95,21 +95,21 @@ router.get('/', (req, res) => {
 // GET /api/users/:id - Get user by ID
 router.get('/:id', (req, res) => {
   const user = users.find(u => u.id === req.params.id);
-  
+
   if (!user) {
     return res.status(404).json({
       error: 'User not found',
       message: `User with ID ${req.params.id} does not exist`
     });
   }
-  
+
   res.json(user);
 });
 
 // POST /api/users - Create new user
 router.post('/', validateUser, (req, res) => {
   const { name, email, age, role = 'user' } = req.body;
-  
+
   // Check if email already exists
   const existingUser = users.find(u => u.email === email);
   if (existingUser) {
@@ -118,7 +118,7 @@ router.post('/', validateUser, (req, res) => {
       message: 'A user with this email already exists'
     });
   }
-  
+
   const newUser = {
     id: uuidv4(),
     name,
@@ -128,9 +128,9 @@ router.post('/', validateUser, (req, res) => {
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString()
   };
-  
+
   users.push(newUser);
-  
+
   res.status(201).json({
     message: 'User created successfully',
     user: newUser
@@ -140,16 +140,16 @@ router.post('/', validateUser, (req, res) => {
 // PUT /api/users/:id - Update user
 router.put('/:id', validateUserUpdate, (req, res) => {
   const userIndex = users.findIndex(u => u.id === req.params.id);
-  
+
   if (userIndex === -1) {
     return res.status(404).json({
       error: 'User not found',
       message: `User with ID ${req.params.id} does not exist`
     });
   }
-  
+
   const { name, email, age, role } = req.body;
-  
+
   // Check if email already exists (excluding current user)
   if (email) {
     const existingUser = users.find(u => u.email === email && u.id !== req.params.id);
@@ -160,7 +160,7 @@ router.put('/:id', validateUserUpdate, (req, res) => {
       });
     }
   }
-  
+
   const updatedUser = {
     ...users[userIndex],
     ...(name && { name }),
@@ -169,9 +169,9 @@ router.put('/:id', validateUserUpdate, (req, res) => {
     ...(role && { role }),
     updatedAt: new Date().toISOString()
   };
-  
+
   users[userIndex] = updatedUser;
-  
+
   res.json({
     message: 'User updated successfully',
     user: updatedUser
@@ -181,16 +181,16 @@ router.put('/:id', validateUserUpdate, (req, res) => {
 // DELETE /api/users/:id - Delete user
 router.delete('/:id', (req, res) => {
   const userIndex = users.findIndex(u => u.id === req.params.id);
-  
+
   if (userIndex === -1) {
     return res.status(404).json({
       error: 'User not found',
       message: `User with ID ${req.params.id} does not exist`
     });
   }
-  
+
   const deletedUser = users.splice(userIndex, 1)[0];
-  
+
   res.json({
     message: 'User deleted successfully',
     user: deletedUser
@@ -242,4 +242,45 @@ router.post('/login', (req, res) => {
   });
 });
 
+
+// POST /api/users/register - Registrasi user baru
+router.post('/register', (req, res) => {
+  const { name, email, password } = req.body;
+
+  // Cek kelengkapan data
+  if (!name || !email || !password) {
+    return res.status(400).json({
+      error: 'Missing fields',
+      message: 'Please provide name, email, and password.'
+    });
+  }
+
+  // Cek apakah email sudah ada
+  const existingUser = users.find(u => u.email === email);
+  if (existingUser) {
+    return res.status(409).json({
+      error: 'Email already exists',
+      message: 'A user with this email already exists'
+    });
+  }
+
+  const newUser = {
+    id: uuidv4(),
+    name,
+    email,
+    password, // Di dunia nyata, ini harus di-hash!
+    age: 18, // Default
+    role: 'user', // Selalu 'user' saat register
+    teamId: 'team-A', // Default team
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+
+  users.push(newUser); // Tambahkan user baru ke "database"
+
+  res.status(201).json({
+    message: 'User created successfully',
+    user: { id: newUser.id, name: newUser.name, email: newUser.email }
+  });
+});
 module.exports = router;
