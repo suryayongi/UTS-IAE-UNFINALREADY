@@ -164,7 +164,9 @@ async function startServer() {
 
   const server = new ApolloServer({
     schema,
+    // ==========================================================
     // INI ADALAH PERBAIKANNYA:
+    // ==========================================================
     context: ({ req }) => {
       // Baca data user dari header kustom yang dikirim Gateway
       const userDataHeader = req.headers['x-user-data'];
